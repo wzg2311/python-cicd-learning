@@ -1,0 +1,12 @@
+# Python CI/CD Learning Project - 依赖清单
+# 格式: package==version (锁定版本，确保可复现性)
+
+# 测试框架
+pytest==8.3.4
+pytest-cov==6.0.0          # 测试覆盖率报告
+
+# 代码质量
+flake8==7.1.1              # PEP8 代码风格检查
+
+# 工具库（可选，增强功能）
+rich==13.9.4               # 终端美化输出
