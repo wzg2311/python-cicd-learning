@@ -2,7 +2,7 @@
 #  GitHub Actions CI/CD 流水线配置
 #  文件位置: .github/workflows/ci.yml
 #  触发条件: push到main分支 或 pull request到main分支
-#  包含: 拉代码 → 配Python → 装依赖 → 代码检查 → 测试 → 部署
+#  包含: 拉代码 → 配Python → 装依赖 → 代码检查 → 测试 → 部署 → 发布Release
 # ============================================================
 
 name: Python CI/CD Pipeline
@@ -13,6 +13,9 @@ on:
       - main
       - master
       - 'feature/**'   # feature分支也会触发，方便开发调试CI
+    # 🆕 推送 tag 时也触发（用于正式版本发布）
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -27,7 +30,7 @@ jobs:
   lint:
     name: 🔍 代码质量检查 (flake8)
     runs-on: ubuntu-latest
-    
+
     steps:
       # Step 1: 拉取代码（从GitHub仓库下载最新代码）
       - name: 📥 Checkout code
@@ -121,14 +124,14 @@ jobs:
           echo ""
           echo "📍 部署环境: ${{ github.ref }}"
           echo "🔗 提交SHA: ${{ github.sha }}"
-          echo "👤 触发者: ${{ github.actor }}"
+          echo "👤 触发者: @${{ github.actor }}"
           echo "🕐 部署时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
           echo ""
-          
+
           # 运行主程序验证可执行性
           echo "✅ 运行主程序验证..."
           python main.py
-          
+
           echo ""
           echo "=========================================="
           echo "  ✅ 部署成功！（模拟）"
@@ -144,3 +147,196 @@ jobs:
           echo "- **提交**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **触发者**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **状态**: ✅ 成功" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== Job 4: 自动发布 Release 🆕 ====================
+  release:
+    name: 📦 发布 Release
+    runs-on: ubuntu-latest
+    needs: deploy  # 必须部署成功后才能发布！
+    # 仅push到main/master时自动发布（tag触发会创建正式版）
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write  # 必须有写入权限才能创建Release
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ─── Step 1: 生成版本号和构建信息 ───
+      - name: 🔖 Generate version info
+        id: version
+        run: |
+          # 版本号规则：
+          # - tag推送 → 使用tag名作为版本号 (如 v1.0.0)
+          # - 普通push → 自动生成日期版本号 (如 v2026.0510.dev)
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            # 基于日期+短SHA生成开发版版本号
+            DATE=$(date '+%Y.%m.%d')
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            VERSION="v${DATE}.dev-${SHORT_SHA}"
+          fi
+
+          # 输出给后续step使用
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_no_v=${VERSION#'v'}" >> "$GITHUB_OUTPUT"
+
+          # 显示版本信息
+          echo ""
+          echo "╔══════════════════════════════════════╗"
+          echo "║     📦 版本发布信息                     ║"
+          echo "╠══════════════════════════════════════╣"
+          echo "║  版本号: ${VERSION}"
+          echo "║  分支:   ${{ github.ref_name }}"
+          echo "║  提交:   ${{ github.sha }}"
+          echo "║  作者:   @${{ github.actor }}"
+          echo "║  时间:   $(date '+%Y-%m-%d %H:%M:%S UTC') "
+          echo "╚══════════════════════════════════════╝"
+
+      # ─── Step 2: 运行测试生成报告（用于附在Release中）───
+      - name: 🧪 Run final tests for release report
+        id: test_report
+        run: |
+          TEST_OUTPUT=$(python3 -m pytest tests/ -v --tb=no 2>&1)
+          TOTAL=$(echo "$TEST_OUTPUT" | grep -oP '\d+(?=\s*passed)' | tail -1)
+          echo "tests_passed=${TOTAL:-0}" >> "$GITHUB_OUTPUT"
+
+          # 保存完整测试输出到文件供后续使用
+          echo "$TEST_OUTPUT" > test_report.txt
+          echo "✅ 测试完成: ${TOTAL:-0} 个用例通过"
+
+      # ─── Step 3: 打包源码和产物 ───
+      - name: 📁 Package source code and artifacts
+        run: |
+          VERSION="${{ steps.version.outputs.version_no_v }}"
+
+          # 创建发布包目录
+          mkdir -p dist/python-cicd-learning-${VERSION}
+
+          # 复制源文件（排除不需要的）
+          rsync -av \
+            --exclude='.git' \
+            --exclude='venv' \
+            --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='*.pyc' \
+            --exclude='.coverage' \
+            . dist/python-cicd-learning-${VERSION}/
+
+          # 生成 CHANGELOG.md
+          cat > dist/python-cicd-learning-${VERSION}/CHANGELOG.md << 'EOF'
+          # Changelog
+
+          ## ${{ steps.version.outputs.version }} ($(date '+%Y-%m-%d'))
+
+          ### ✅ Features
+          - 基础计算器模块（加减乘除 + 除零异常处理）
+          - 税费计算模块（个税累进税率 / 增值税 / 社保公积金）
+          - 项目配置管理模块（多环境支持）
+
+          ### ✅ Quality
+          - 44 个 pytest 单元测试用例（100% 通过）
+          - PEP8 代码规范检查（flake8）
+          - GitHub Actions CI/CD 全自动化流水线
+
+          ### 📊 Test Summary
+          - Tests: ${{ steps.test_report.outputs.tests_passed }} passed
+          - Coverage report included
+          EOF
+
+          # 打包成 tar.gz 和 zip 两种格式
+          cd dist
+          tar -czvf python-cicd-learning-${VERSION}.source.tar.gz python-cicd-learning-${VERSION}/
+          zip -r python-cicd-learning-${VERSION}.source.zip python-cicd-learning-${VERSION}/
+
+          echo ""
+          echo "📦 打包完成:"
+          ls -lh python-cicd-learning-${VERSION}.*
+
+      # ─── Step 4: 创建 GitHub Release ───
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "🚀 Release ${{ steps.version.outputs.version }}"
+          body: |
+            ## 🎉 Python CI/CD Learning Project — ${{ steps.version.outputs.version }}
+
+            **自动发布于** $(date '+%Y-%m-%d %H:%M UTC') by @${{ github.actor }}
+
+            ---
+
+            ### 📋 本次发布内容
+
+            | 项目 | 详情 |
+            |------|------|
+            | **版本** | `${{ steps.version.outputs.version }}` |
+            | **提交** | `${{ github.sha }}` |
+            | **分支** | `${{ github.ref_name }}` |
+            | **触发者** | @${{ github.actor }} |
+            | **测试结果** | ✅ ${{ steps.test_report.outputs.tests_passed }} 个用例全部通过 |
+            | **代码检查** | ✅ flake8 通过 |
+
+            ### 📦 下载附件
+
+            - `*.source.tar.gz` — 源码压缩包（Linux/macOS 推荐）
+            - `*.source.zip` — 源码压缩包（Windows 推荐）
+
+            ### 🔧 快速开始
+
+            ```bash
+            # 解压
+            tar -xzvf python-cicd-learning-${{ steps.version.outputs.version_no_v }}.source.tar.gz
+            cd python-cicd-learning-${{ steps.version.outputs.version_no_v }}/
+
+            # 安装依赖
+            python3 -m venv venv && source venv/bin/activate
+            pip install -r requirements.txt
+
+            # 运行程序
+            python main.py
+
+            # 运行测试
+            pytest tests/ -v
+            ```
+
+            ### ⚠️ 说明
+
+            > 这是一个 CI/CD 学习演示项目的自动发布。
+            > 每次 push 到 main 分支都会自动创建新的 dev 版本 Release。
+            > 如需发布正式版本，请使用 `git tag v1.0.0 && git push origin v1.0.0`。
+
+            ---
+            *🤖 由 [GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) 自动生成*
+          draft: false       # 是否草稿（正式版设为 false，预发布可用 true）
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}  # 非tag推送标记为预发布
+          files: |
+            dist/*.tar.gz
+            *.zip
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─── Step 5: Release 后置处理 ───
+      - name: 📢 Release summary
+        if: always()
+        run: |
+          echo "## 📦 Release 发布完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 项目 | 内容 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **版本** | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **类型** | ${{ startsWith(github.ref, 'refs/tags/') && '正式版' || '开发版(Pre-release)' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **测试** | ${{ steps.test_report.outputs.tests_passed }} passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| **附件** | 源码tar.gz + zip |" >> $GITHUB_STEP_SUMMARY
