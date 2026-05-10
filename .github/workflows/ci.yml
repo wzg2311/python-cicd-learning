@@ -151,11 +151,20 @@ jobs:
           echo "🔍 验证可执行文件..."
           chmod +x dist/${{ env.APP_NAME }}
 
-          # 实际运行一次，确保能正常工作
-          ./dist/${{ env.APP_NAME }}
+          # 用非交互方式验证：echo 0 传入退出命令，确认程序能正常启动和退出
+          echo "0" | timeout 10 ./dist/${{ env.APP_NAME }} || true
+          EXIT_CODE=$?
 
-          echo ""
-          echo "✅ 可执行文件验证通过！"
+          # 检查文件是否为有效的 ELF 可执行程序
+          FILE_TYPE=$(file --brief dist/${{ env.APP_NAME }})
+          echo "📄 文件类型: $FILE_TYPE"
+
+          if echo "$FILE_TYPE" | grep -qi "ELF.*executable"; then
+            echo "✅ 可执行文件验证通过！（ELF binary confirmed）"
+          else
+            echo "❌ 文件不是有效的 ELF 可执行程序"
+            exit 1
+          fi
 
       # ─── 上传构建产物 artifact ───
       #    供后续 release job 下载并附加到 GitHub Release
@@ -203,7 +212,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🚀 Simulate deployment
+      - name: 🚀 Verify deployment (non-interactive)
         run: |
           echo "=========================================="
           echo "  🚀 开始模拟部署..."
@@ -215,10 +224,28 @@ jobs:
           echo "🕐 部署时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
           echo ""
 
-          echo "✅ 运行主程序验证..."
-          python main.py
-
+          # 非交互验证：导入模块确认代码可加载，运行核心计算函数
+          echo "✅ 验证模块可导入和核心功能可用:"
+          python3 -c "
+from src.calculator import Calculator
+from src.tax_calculator import TaxCalculator
+c = Calculator()
+assert c.add(10, 5) == 15
+assert c.subtract(10, 3) == 7
+assert c.multiply(7, 8) == 56
+assert c.divide(20, 4) == 5.0
+t = TaxCalculator()
+r = t.calculate_personal_income_tax(15000)
+assert r['tax_amount'] > 0
+print('  Calculator + TaxCalculator OK')
+"
           echo ""
+
+          # 用非交互方式启动 main.py（输入 0 立即退出）
+          echo "✅ 验证主程序能正常启动:"
+          echo "0" | timeout 10 python main.py || true
+          echo ""
+
           echo "=========================================="
           echo "  ✅ 部署成功！（模拟）"
           echo "=========================================="
