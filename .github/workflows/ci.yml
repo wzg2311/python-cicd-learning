@@ -226,19 +226,19 @@ jobs:
 
           # 非交互验证：导入模块确认代码可加载，运行核心计算函数
           echo "✅ 验证模块可导入和核心功能可用:"
-          python3 -c "
-from src.calculator import Calculator
-from src.tax_calculator import TaxCalculator
-c = Calculator()
-assert c.add(10, 5) == 15
-assert c.subtract(10, 3) == 7
-assert c.multiply(7, 8) == 56
-assert c.divide(20, 4) == 5.0
-t = TaxCalculator()
-r = t.calculate_personal_income_tax(15000)
-assert r['tax_amount'] > 0
-print('  Calculator + TaxCalculator OK')
-"
+          python3 << 'PYEOF'
+          from src.calculator import Calculator
+          from src.tax_calculator import TaxCalculator
+          c = Calculator()
+          assert c.add(10, 5) == 15
+          assert c.subtract(10, 3) == 7
+          assert c.multiply(7, 8) == 56
+          assert c.divide(20, 4) == 5.0
+          t = TaxCalculator()
+          r = t.calculate_personal_income_tax(15000)
+          assert r['tax_amount'] > 0
+          print('  Calculator + TaxCalculator OK')
+          PYEOF
           echo ""
 
           # 用非交互方式启动 main.py（输入 0 立即退出）
