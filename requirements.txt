@@ -10,3 +10,6 @@ flake8==7.1.1              # PEP8 代码风格检查
 
 # 工具库（可选，增强功能）
 rich==13.9.4               # 终端美化输出
+
+# 构建打包
+pyinstaller==6.11.1        # 打包为独立可执行程序 (Linux/macOS/Windows)
