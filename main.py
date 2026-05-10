@@ -7,7 +7,17 @@ import sys
 import os
 
 # 将项目根目录加入Python路径，确保模块可导入
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 兼容两种运行环境:
+#   1) 正常Python运行: __file__指向main.py所在目录
+#   2) PyInstaller打包: __file__指向临时解压目录(sys._MEIPASS)
+if getattr(sys, 'frozen', False):
+    # PyInstaller 打包后的可执行文件
+    _base_dir = sys._MEIPASS
+else:
+    # 正常 Python 解释器运行
+    _base_dir = os.path.dirname(os.path.abspath(__file__))
+
+sys.path.insert(0, _base_dir)
 
 from src.calculator import Calculator
 from src.tax_calculator import TaxCalculator
